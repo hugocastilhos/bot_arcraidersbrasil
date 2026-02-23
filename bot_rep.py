@@ -79,12 +79,15 @@ def alterar_rep(user_id, quantidade, definir=False):
     return res[0] if res else 0
 
 # --- SISTEMA DE LOGS ---
-async def enviar_log(ctx, mensagem, cor=0xffa500):
+async def enviar_log(origem, mensagem, cor=0xffa500):
     if LOG_CHANNEL_ID == 0: return
     canal = bot.get_channel(LOG_CHANNEL_ID)
     if canal:
+        # Pega o autor independente se for Interaction ou Ctx
+        autor = origem.user if hasattr(origem, 'user') else origem.author
+        
         embed = discord.Embed(title="🛰️ Registro de Atividade", description=mensagem, color=cor, timestamp=datetime.now())
-        embed.set_footer(text=f"Executor: {ctx.author.name}")
+        embed.set_footer(text=f"Executor: {autor.name}")
         await canal.send(embed=embed)
 
 # --- CHECKS (VERIFICAÇÕES) ---
@@ -145,33 +148,47 @@ class FinalizarTrocaView(discord.ui.View):
         super().__init__(timeout=None)
         self.owner_id = owner_id
 
-    @discord.ui.button(
-        label="Finalizar e Excluir Troca", 
-        style=discord.ButtonStyle.danger, 
+        @discord.ui.button(
+        label="Finalizar e Excluir Tópico", 
+        style=discord.ButtonStyle.secondary, 
         emoji="✅",
-        custom_id="btn_finalizar_troca" # ID ÚNICO E FIXO
+        custom_id="btn_finalizar_troca"
     )
-    async def finalizar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # No caso de botões persistentes, o owner_id original se perde no restart
-        # Então buscamos o dono do tópico diretamente do canal (Thread)
-        thread_owner_id = interaction.channel.owner_id
+        async def finalizar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        thread = interaction.channel
         
+        # 1. Verificações de permissão
+        thread_owner_id = thread.owner_id
         is_owner = interaction.user.id == thread_owner_id
         is_staff = any(role.name.lower() == "mods" for role in interaction.user.roles) or interaction.user.guild_permissions.administrator
 
         if not (is_owner or is_staff):
             return await interaction.response.send_message("❌ Apenas o dono do post ou a staff podem finalizar esta troca.", ephemeral=True)
 
-        await interaction.response.send_message("⚠️ **Troca finalizada.** Este tópico será **EXCLUÍDO** em 5 segundos...")
+        # 2. Responde à interação primeiro (evita erro de 'Interaction failed')
+        await interaction.response.send_message("⚠️ **Troca finalizada.** Este tópico será **EXCLUÍDO** permanentemente em 5 segundos..")
         
         await asyncio.sleep(5)
         
         try:
-            nome_topico = interaction.channel.name
-            await enviar_log(interaction, f"🗑️ **Tópico Excluído (Botão Persistente)**\nPost: `{nome_topico}`\nExecutor: {interaction.user.mention}", 0xe74c3c)
-            await interaction.channel.delete(reason=f"Finalizado por {interaction.user.name}")
+            nome_topico = thread.name
+            
+            # 3. Log antes de apagar
+            # Criamos um contexto fictício para o seu sistema de log funcionar
+            await enviar_log(interaction, f"🗑️ **Tópico Excluído**\nPost: `{nome_topico}`\nExecutor: {interaction.user.mention}", 0xe74c3c)
+            
+            # 4. Tenta deletar o tópico
+            await thread.delete(reason=f"Finalizado por {interaction.user.name}")
+            print(f"✅ Tópico '{nome_topico}' excluído com sucesso.")
+
+        except discord.Forbidden:
+            print(f"❌ ERRO: O Bot não tem permissão (discord.Forbidden) para excluir o tópico {thread.id}")
+            # Tenta avisar no canal se ainda for possível
+            try:
+                await thread.send("❌ **Erro de Permissão:** O bot precisa da permissão 'Gerenciar Tópicos' para excluir este canal.")
+            except: pass
         except Exception as e:
-            print(f"Erro ao excluir tópico: {e}")
+            print(f"❌ Erro ao excluir tópico: {e}")
 
 # --- SISTEMA DE RAID (UI) ---
 class VoiceSelectionView(discord.ui.View):
@@ -346,9 +363,8 @@ async def on_thread_create(thread):
                 "**Dicas de Segurança:**\n"
                 "1. Verifique a reputação de alguém usando o comando `!perfil @membro` antes fazer uma troca.\n"
                 "2. Use o comando `!rep @membro` apenas após a troca ser concluída com sucesso.\n"
-                "3. Use o comando `!finalizar` para finalizar sua troca e fecharmos seu tópico.\n"
-                "4. Se por acaso for scammado, abra um ticket acionando nossos mods imediatamente e use o comando `!neg @membro` para negativar o raider.\n\n"
-                "***RMT: Compra e venda de itens com dinheiro real é PROIBIDO e passivo de banimento aqui e no jogo, cuida.***\n"
+                "3. Se por acaso for scammado, abra um ticket acionando nossos mods imediatamente e use o comando `!neg @membro` para negativar o raider.\n\n"
+                "***RMT: Compra e venda de itens com dinheiro real é PROIBIDO e passivo de banimento aqui e no jogo, cuida.***\n\n"
             ),
             color=discord.Color.blue()
             )
