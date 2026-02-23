@@ -132,24 +132,45 @@ eventos_anunciados = set()
 @tasks.loop(minutes=5)
 async def monitorar_eventos():
     canal = bot.get_channel(ID_CANAL_EVENTOS)
-    if not canal: return
+    if not canal:
+        return
+
     try:
-        response = requests.get("https://metaforge.app/api/arc-raiders/events-schedule", timeout=10)
+        # Request com cabeçalho de User-Agent para evitar bloqueios da API
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get("https://metaforge.app/api/arc-raiders/events-schedule", headers=headers, timeout=10)
+        
         if response.status_code == 200:
             dados = response.json()
             eventos = dados.get('events', [])
+            
             for ev in eventos:
                 ev_id = ev.get('id')
+                # Só anuncia se estiver ativo e se ainda não foi anunciado
                 if ev.get('is_active') and ev_id not in eventos_anunciados:
                     mapa = ev.get('map_name', 'Desconhecido').upper()
                     nome_evento = ev.get('event_name', 'Operação Padrão')
                     descricao = ev.get('description', 'Fique atento aos perigos!')
-                    embed = discord.Embed(title=f"⚠️ ALERTA: {nome_evento}", description=f"**Setor:** {mapa}\n\n{descricao}", color=0xffa500)
+                    
+                    embed = discord.Embed(
+                        title=f"⚠️ ALERTA: {nome_evento}", 
+                        description=f"**Setor:** {mapa}\n\n{descricao}", 
+                        color=0xffa500
+                    )
                     embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/564/564619.png")
+                    embed.set_footer(text="ARC Raiders API • Metaforge")
+                    
                     await canal.send(content="🚨 **Novo evento detectado!**", embed=embed)
                     eventos_anunciados.add(ev_id)
-            if len(eventos_anunciados) > 50: eventos_anunciados.clear()
-    except Exception as e: print(f"Erro eventos: {e}")
+            
+            # Limpa o cache se ficar muito grande
+            if len(eventos_anunciados) > 50: 
+                eventos_anunciados.clear()
+        else:
+            print(f"Erro API Eventos: Status {response.status_code}")
+            
+    except Exception as e: 
+        print(f"Erro na tarefa de eventos: {e}")
 
 @tasks.loop(minutes=10)
 async def manter_banco_vivo():
@@ -169,12 +190,13 @@ async def on_ready():
     # Inicia os loops apenas se não estiverem rodando
     if not monitorar_eventos.is_running():
         monitorar_eventos.start()
+        print("✅ Monitor de eventos iniciado.")
         
     if not manter_banco_vivo.is_running():
         manter_banco_vivo.start()
+        print("✅ Manutenção do banco iniciada.")
         
-    print(f"✅ {bot.user.name} está ONLINE!")
-    print(f"📡 Monitorando eventos em: {ID_CANAL_NOTICIAS}")
+    print(f"🚀 {bot.user.name} está online!")
     await bot.change_presence(activity=discord.Game(name="!ajuda | ARC Raiders Brasil"))
 
 # --- SISTEMA DE CARGOS ---
