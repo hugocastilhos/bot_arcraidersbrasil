@@ -209,55 +209,52 @@ class RaidView(discord.ui.View):
 
     @discord.ui.button(label="Entrar no Squad", style=discord.ButtonStyle.green, emoji="✋")
     async def entrar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Verifica se o usuário já está no squad
+        # 1. Bloqueia se já estiver no squad
         if interaction.user in self.participantes:
+            # Se o HOST clicar de novo, ele pode querer ver os links das salas
+            if interaction.user.id == self.host.id and len(self.participantes) >= self.vagas_totais:
+                view_voz = VoiceSelectionView(interaction.guild.id)
+                return await interaction.response.send_message(
+                    content=f"🎮 **Sua Raid está pronta!**\nEscolha uma sala, copie o link e envie para o squad:\n{', '.join([m.mention for m in self.participantes if m.id != self.host.id])}",
+                    view=view_voz, ephemeral=True
+                )
             return await interaction.response.send_message("❌ Você já está neste squad!", ephemeral=True)
         
+        # 2. Verifica se já lotou
+        if len(self.participantes) >= self.vagas_totais:
+            return await interaction.response.send_message("❌ Este squad já está cheio!", ephemeral=True)
+
         self.participantes.append(interaction.user)
         
-        # Atualiza o Embed original para todos verem quem entrou
+        # Atualiza o Embed
         embed = interaction.message.embeds[0]
-        lista_mentions = "\n".join([m.mention for m in self.participantes])
-        embed.set_field_at(1, name=f"Membros ({len(self.participantes)}/{self.vagas_totais})", value=lista_mentions, inline=False)
+        lista = "\n".join([m.mention for m in self.participantes])
+        embed.set_field_at(1, name=f"Membros ({len(self.participantes)}/{self.vagas_totais})", value=lista, inline=False)
 
+        # 3. Se completar o squad com este clique
         if len(self.participantes) >= self.vagas_totais:
-            # Finaliza o recrutamento no card público
-            button.disabled = True
-            button.label = "Squad Completo"
-            button.style = discord.ButtonStyle.secondary
+            button.disabled, button.label, button.style = True, "Squad Completo", discord.ButtonStyle.secondary
             embed.color = discord.Color.gold()
             await interaction.message.edit(embed=embed, view=self)
 
-            # Lógica de notificação privada
-            view_voz = VoiceSelectionView(interaction.guild.id)
-            msg_instrucao = (
-                f"🎮 **Sua Raid de {self.mapa.upper()} está pronta!**\n\n"
-                "1. Escolha uma das **Salas de Voz** abaixo.\n"
-                "2. Clique com o botão direito na sala escolhida e selecione **'Copiar Link'**.\n"
-                "3. Envie o link para os seus parceiros de squad!"
-            )
-
-            # Se o Líder foi o último a clicar (completando a própria raid)
+            # MENSAGEM PARA O CRIADOR (Somente se ele foi o último a clicar)
             if interaction.user.id == self.host.id:
-                await interaction.response.send_message(content=msg_instrucao, view=view_voz, ephemeral=True)
+                view_voz = VoiceSelectionView(interaction.guild.id)
+                await interaction.response.send_message(
+                    content=f"✅ **Squad Lotado!**\n\nEscolha uma sala abaixo, copie o link e envie para seus parceiros:\n"
+                            f"Instrução: Clique com o botão direito na sala -> Copiar Link -> Cole aqui no canal.",
+                    view=view_voz, ephemeral=True
+                )
             else:
-                # Se outra pessoa completou, confirmamos para ela e tentamos avisar o líder
-                await interaction.response.send_message("✅ Você completou o squad! Aguarde o líder iniciar.", ephemeral=True)
-                
-                # Tentamos enviar no privado do líder para manter a discrição total
-                try:
-                    await self.host.send(content=msg_instrucao, view=view_voz)
-                except discord.Forbidden:
-                    # Se a DM dele for fechada, usamos um alerta que só ele lê no canal
-                    # Usamos o ID do host para garantir que apenas ele receba essa interação se ele interagir depois
-                    await interaction.channel.send(
-                        f"⚠️ {self.host.mention}, seu squad lotou! Como sua DM é fechada, use `!perfil` ou qualquer comando para eu tentar te enviar as salas, ou peça para a staff.", 
-                        delete_after=15
-                    )
+                # Se OUTRA pessoa completou, o bot avisa ela e deixa um aviso para o líder clicar
+                await interaction.response.send_message(
+                    content=f"✅ Você completou o squad! {self.host.mention}, clique no botão 'Squad Completo' para ver as salas.", 
+                    ephemeral=True
+                )
         else:
-            # Se ainda não lotou, apenas atualiza o card
+            # Apenas atualiza o card se não encheu
             await interaction.message.edit(embed=embed, view=self)
-            await interaction.response.send_message(f"✅ Você entrou no squad de {self.host.name}!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Você entrou!", ephemeral=True)
 
 # --- 2. O COMANDO ---
 @bot.command()
