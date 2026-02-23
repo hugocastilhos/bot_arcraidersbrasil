@@ -162,21 +162,6 @@ async def manter_banco_vivo():
             print("ping no banco: OK")
     except Exception as e: print(f"Erro ping banco: {e}")
 
-@bot.event
-async def on_ready():
-    setup_db()
-    
-    # Inicia os loops apenas se não estiverem rodando
-    if not monitorar_eventos.is_running():
-        monitorar_eventos.start()
-        
-    if not manter_banco_vivo.is_running():
-        manter_banco_vivo.start()
-        
-    print(f"✅ {bot.user.name} está ONLINE!")
-    print(f"📡 Monitorando eventos em: {ID_CANAL_NOTICIAS}")
-    await bot.change_presence(activity=discord.Game(name="!ajuda | ARC Raiders Brasil"))
-
 # --- SISTEMA DE CARGOS ---
 async def verificar_cargos_nivel(ctx, membro, pontos):
     niveis = [{"limite": 100, "nome": "trocador oficial"}, {"limite": 50, "nome": "trocador confiavel"}, {"limite": 10, "nome": "trocador iniciante"}]
@@ -218,12 +203,22 @@ class RaidView(discord.ui.View):
         if len(self.participantes) >= self.vagas_totais:
             button.disabled, button.label, button.style = True, "Squad Completo", discord.ButtonStyle.secondary
             embed.color = discord.Color.gold()
+            
+            # 1. Atualiza a mensagem original para todos verem que fechou
             await interaction.message.edit(embed=embed, view=self)
+            
+            # 2. Cria a view com os links das salas
             view_voz = VoiceSelectionView(interaction.guild.id)
-            await interaction.response.send_message(content=f"🎮 **Squad Pronto!**", view=view_voz, ephemeral=True)
-        else:
-            await interaction.message.edit(embed=embed, view=self)
-            await interaction.response.send_message(f"✅ Você entrou!", ephemeral=True)
+            
+            # 3. MENCIONA todos os participantes no canal para eles saberem qual sala escolher
+            mentions = " ".join([m.mention for m in self.participantes])
+            await interaction.channel.send(
+                content=f"🎮 **SQUAD FORMADO!**\n{mentions}\nEscolha uma das salas de voz abaixo para criar sua raid:",
+                view=view_voz
+            )
+            
+            # Responde à interação final
+            await interaction.response.send_message("✅ Squad finalizado e salas liberadas! Mande o link dela para os integrantes da raid.", ephemeral=True)
 
 # --- 2. O COMANDO ---
 @bot.command()
@@ -244,9 +239,16 @@ async def raid(ctx, mapa: str = None, vagas: int = None):
 @bot.event
 async def on_ready():
     setup_db()
-    if not monitorar_eventos.is_running(): monitorar_eventos.start()
-    if not manter_banco_vivo.is_running(): manter_banco_vivo.start()
-    print(f"✅ {bot.user.name} ONLINE")
+    
+    # Inicia os loops apenas se não estiverem rodando
+    if not monitorar_eventos.is_running():
+        monitorar_eventos.start()
+        
+    if not manter_banco_vivo.is_running():
+        manter_banco_vivo.start()
+        
+    print(f"✅ {bot.user.name} está ONLINE!")
+    print(f"📡 Monitorando eventos em: {ID_CANAL_NOTICIAS}")
     await bot.change_presence(activity=discord.Game(name="!ajuda | ARC Raiders Brasil"))
 
 @bot.event
@@ -255,7 +257,6 @@ async def on_thread_create(thread):
     ID_FORUM_TROCA = 1434310955004592360
 
     # 1. Pequeno delay para garantir que a thread está estável
-    import asyncio
     await asyncio.sleep(2)
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -394,7 +395,6 @@ async def finalizar(ctx):
         # Aviso antes de deletar (já que a exclusão é irreversível)
         await ctx.send("⚠️ **Troca finalizada.** Este tópico será **EXCLUÍDO** permanentemente em 5 segundos..")
         
-        import asyncio
         await asyncio.sleep(5)
         
         try:
@@ -626,12 +626,6 @@ async def manter_banco_vivo():
         print("ping no banco: OK")
     except Exception as e:
         print(f"Erro no ping do banco: {e}")
-
-@bot.event
-async def on_ready():
-    setup_db()
-    manter_banco_vivo.start() # Inicia o loop quando o bot liga
-    print(f"✅ {bot.user.name} Online e Banco Protegido")
 
 if __name__ == "__main__":
     setup_db()
