@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import io # Adiciona isto no topo do ficheiro, junto aos outros imports
+from discord.ext import tasks
 
 # --- CONFIGURAÇÕES ---
 def carregar_config():
@@ -97,6 +98,11 @@ async def verificar_canal(ctx):
     ID_FORUM_TROCA = 1434310955004592360
     ID_CANAL_STAFF = 1412423356946317350
 
+    CANAIS_VOZ_IDS = [
+    1441884973077495808, 1441885994248044605, 1441887071533928540,
+    1439303187332071594, 1439314706719445218, 1439314014579593607
+]
+
     # Verificações de Identidade
     is_admin = ctx.author.guild_permissions.administrator
     is_mod = any(role.name.lower() == "mods" for role in ctx.author.roles)
@@ -136,6 +142,65 @@ def ignora_cooldown_staff():
         return True
     return commands.check(predicate)
 
+# ALERTA EVENTOS 
+ID_CANAL_NOTICIAS = 1455200454173790208
+API_URL_EVENTOS = "https://metaforge.app/api/arc-raiders/events-schedule"
+
+# Variável global para evitar avisos repetidos do mesmo evento
+eventos_anunciados = set()
+
+@tasks.loop(minutes=5) # Verifica a cada 5 minutos
+async def monitorar_eventos():
+    canal = bot.get_channel(ID_CANAL_NOTICIAS)
+    if not canal:
+        return
+
+    try:
+        # Consulta a API
+        response = requests.get(API_URL_EVENTOS, timeout=10)
+        if response.status_code == 200:
+            dados = response.json()
+            eventos = dados.get('events', [])
+
+            for ev in eventos:
+                ev_id = ev.get('id') # ID único do evento vindo da API
+                
+                # Só anuncia se for um evento ATIVO e que ainda não foi anunciado nesta sessão
+                if ev.get('is_active') and ev_id not in eventos_anunciados:
+                    mapa = ev.get('map_name', 'Desconhecido').upper()
+                    nome_evento = ev.get('event_name', 'Operação Padrão')
+                    descricao = ev.get('description', 'Fique atento aos perigos na zona de extração!')
+
+                    embed = discord.Embed(
+                        title=f"⚠️ ALERTA DE EVENTO: {nome_evento}",
+                        description=f"**Setor:** {mapa}\n\n{descricao}",
+                        color=0xffa500 # Laranja para alerta
+                    )
+                    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/564/564619.png")
+                    embed.add_field(name="Status", value="🟢 ATIVO AGORA", inline=True)
+                    embed.set_footer(text="Atualização automática via Satélite ARC")
+                    
+                    # Envia o alerta e marca @here ou um cargo específico se desejar
+                    await canal.send(content="🚨 **Novo evento detectado!**", embed=embed)
+                    
+                    # Adiciona à lista de já anunciados
+                    eventos_anunciados.add(ev_id)
+                    
+            # Limpeza opcional: Se a lista de anunciados ficar muito grande, limpe IDs antigos
+            if len(eventos_anunciados) > 50:
+                eventos_anunciados.clear()
+
+    except Exception as e:
+        print(f"Erro ao monitorar eventos: {e}")
+
+# Inicia o loop quando o bot estiver pronto
+@bot.event
+async def on_ready():
+    setup_db()
+    if not monitorar_eventos.is_running():
+        monitorar_eventos.start()
+    print(f"✅ {bot.user.name} online e monitorando eventos!")
+
 # --- SISTEMA DE CARGOS ---
 async def verificar_cargos_nivel(ctx, membro, pontos):
     niveis = [{"limite": 100, "nome": "trocador oficial"}, {"limite": 50, "nome": "trocador confiavel"}, {"limite": 10, "nome": "trocador iniciante"}]
@@ -149,6 +214,68 @@ async def verificar_cargos_nivel(ctx, membro, pontos):
         if cargo:
             if pontos >= nivel["limite"] and cargo not in membro.roles: await membro.add_roles(cargo)
             elif pontos < nivel["limite"] and cargo in membro.roles: await membro.remove_roles(cargo)
+
+# --- SISTEMA DE RAID (UI) ---
+
+class VoiceSelectionView(discord.ui.View):
+    def __init__(self, guild_id, host):
+        super().__init__(timeout=None)
+        self.host = host
+        for i, canal_id in enumerate(CANAIS_VOZ_IDS, 1):
+            self.add_item(discord.ui.Button(
+                label=f"Criar sala de voz {i}", 
+                url=f"https://discord.com/channels/{guild_id}/{canal_id}",
+                style=discord.ButtonStyle.link
+            ))
+
+class RaidView(discord.ui.View):
+    def __init__(self, host, mapa, vagas_totais):
+        super().__init__(timeout=3600)
+        self.host = host
+        self.mapa = mapa
+        self.vagas_totais = vagas_totais
+        self.participantes = [host]
+
+    @discord.ui.button(label="Entrar no Squad", style=discord.ButtonStyle.green, emoji="✋")
+    async def entrar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user in self.participantes:
+            return await interaction.response.send_message("❌ Você já está neste squad!", ephemeral=True)
+        
+        if len(self.participantes) >= self.vagas_totais:
+            return await interaction.response.send_message("❌ Squad cheio!", ephemeral=True)
+
+        self.participantes.append(interaction.user)
+        
+        embed = interaction.message.embeds[0]
+        lista_membros = "\n".join([f"👤 {m.mention}" for m in self.participantes])
+        embed.set_field_at(1, name=f"Membros ({len(self.participantes)}/{self.vagas_totais})", value=lista_membros, inline=False)
+        
+        if len(self.participantes) >= self.vagas_totais:
+            button.disabled = True
+            button.label = "Squad Completo"
+            button.style = discord.ButtonStyle.secondary
+            embed.color = discord.Color.gold()
+            embed.title = f"✅ SQUAD COMPLETO: {self.mapa.upper()}"
+            
+            await interaction.message.edit(embed=embed, view=self)
+
+            # Mensagem exclusiva para o Host (ou para quem fechou o squad avisando o host)
+            view_voz = VoiceSelectionView(interaction.guild.id, self.host)
+            
+            instrucao = (
+                f"🎮 **Squad Pronto!**\n\n"
+                f"1. Clique em uma das salas abaixo para criar sua sala de raid.\n"
+                f"2. **AVISO:** Após entrar, informe aos membros {', '.join([m.mention for m in self.participantes if m != self.host])} qual sala você escolheu ou envie o link da sala para eles!"
+            )
+
+            # Se quem fechou o squad não foi o host, o bot manda o aviso no canal para o host ver
+            await interaction.response.send_message(content=instrucao, view=view_voz, ephemeral=True)
+            
+            if interaction.user != self.host:
+                await interaction.channel.send(f"🔔 {self.host.mention}, seu squad está pronto! Verifique a mensagem do sistema para escolher a sala de voz.")
+        else:
+            await interaction.message.edit(embed=embed, view=self)
+            await interaction.response.send_message(f"✅ Você entrou no squad de {self.host.display_name}!", ephemeral=True)
 
 # --- EVENTOS ---
 @bot.event
@@ -207,11 +334,29 @@ async def on_thread_create(thread):
 
 # --- COMANDOS ---
 @bot.command()
+async def raid(ctx, mapa: str, vagas_extras: int):
+    """Cria uma raid para Duo (1 vaga) ou Trio (2 vagas)."""
+    if ctx.channel.id != ID_CANAL_RAID:
+        return await ctx.send(f"❌ Use este comando em <#{ID_CANAL_RAID}>", delete_after=5)
+
+    if vagas_extras < 1 or vagas_extras > 2:
+        return await ctx.send("❌ Use `!raid [mapa/objetivo] 1` para Duo ou `2` para Trio.", delete_after=10)
+
+    total = vagas_extras + 1
+    embed = discord.Embed(title=f"🚨 Recrutamento: {'DUO' if total==2 else 'TRIO'}", color=discord.Color.green())
+    embed.add_field(name="📍 Mapa/Objetivo", value=mapa.upper(), inline=True)
+    embed.add_field(name=f"Membros (1/{total})", value=f"👤 {ctx.author.mention}", inline=False)
+    
+    await ctx.send(embed=embed, view=RaidView(ctx.author, mapa, total))
+
+@bot.command()
 async def ajuda(ctx):
     embed = discord.Embed(title="📖 Lista de Comandos", color=discord.Color.blue())
     embed.add_field(name="🌟 `!rep @membro`", value="Dá +1 de reputação.", inline=True)
     embed.add_field(name="💢 `!neg @membro`", value="Dá -1 de reputação.", inline=True)
     embed.add_field(name="👤 `!perfil @membro`", value="Ver reputação.", inline=True)
+    embed.add_field(name="📡 `!raid mapa/objetivo 1`", value="Cria uma raid para duo.", inline=True)
+    embed.add_field(name="📡 `!raid mapa/objetivo 2`", value="Cria uma raid para trio.", inline=True)
     embed.add_field(name="✅ `!finalizar`", value="Finaliza uma troca e fecha o tópico.", inline=True)
     embed.add_field(name="🏆 `!top`", value="Ver o ranking dos 10 melhores trocadores.", inline=True)
     
