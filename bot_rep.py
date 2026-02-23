@@ -139,6 +139,40 @@ async def verificar_cargos_nivel(ctx, membro, pontos):
             if pontos >= nivel["limite"] and cargo not in membro.roles: await membro.add_roles(cargo)
             elif pontos < nivel["limite"] and cargo in membro.roles: await membro.remove_roles(cargo)
 
+class FinalizarTrocaView(discord.ui.View):
+    def __init__(self, owner_id=None):
+        # timeout=None é essencial para persistência
+        super().__init__(timeout=None)
+        self.owner_id = owner_id
+
+    @discord.ui.button(
+        label="Finalizar e Excluir Troca", 
+        style=discord.ButtonStyle.danger, 
+        emoji="✅",
+        custom_id="btn_finalizar_troca" # ID ÚNICO E FIXO
+    )
+    async def finalizar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # No caso de botões persistentes, o owner_id original se perde no restart
+        # Então buscamos o dono do tópico diretamente do canal (Thread)
+        thread_owner_id = interaction.channel.owner_id
+        
+        is_owner = interaction.user.id == thread_owner_id
+        is_staff = any(role.name.lower() == "mods" for role in interaction.user.roles) or interaction.user.guild_permissions.administrator
+
+        if not (is_owner or is_staff):
+            return await interaction.response.send_message("❌ Apenas o dono do post ou a staff podem finalizar esta troca.", ephemeral=True)
+
+        await interaction.response.send_message("⚠️ **Troca finalizada.** Este tópico será **EXCLUÍDO** em 5 segundos...")
+        
+        await asyncio.sleep(5)
+        
+        try:
+            nome_topico = interaction.channel.name
+            await enviar_log(interaction, f"🗑️ **Tópico Excluído (Botão Persistente)**\nPost: `{nome_topico}`\nExecutor: {interaction.user.mention}", 0xe74c3c)
+            await interaction.channel.delete(reason=f"Finalizado por {interaction.user.name}")
+        except Exception as e:
+            print(f"Erro ao excluir tópico: {e}")
+
 # --- SISTEMA DE RAID (UI) ---
 class VoiceSelectionView(discord.ui.View):
     def __init__(self, guild_id):
@@ -238,6 +272,46 @@ async def on_ready():
     setup_db()
     print(f"✅ {bot.user.name} ONLINE")
     await bot.change_presence(activity=discord.Game(name="!ajuda | ARC Raiders Brasil"))
+
+@bot.event
+async def on_thread_create(thread):
+    ID_FORUM_TROCA = 1434310955004592360
+    await asyncio.sleep(2)
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT motivo FROM blacklist WHERE user_id = %s', (thread.owner_id,))
+    blacklisted = cursor.fetchone()
+    conn.close()
+
+    if blacklisted:
+        await thread.send(f"🚨 **ALERTA DE SEGURANÇA** 🚨\n{thread.owner.mention}, você está na **LISTA NEGRA** e não pode trocar.\n**Motivo:** {blacklisted[0]}")
+        await thread.edit(locked=True, archived=True)
+        return
+
+    if thread.parent_id == ID_FORUM_TROCA:
+        try:
+            embed = discord.Embed(
+                title="📦 Nova Troca Iniciada!",
+                description=(
+                    f"Olá {thread.owner.mention}, bem-vindo ao sistema de trocas!\n\n"
+                    "**Dicas de Segurança:**\n"
+                    "1. Verifique a reputação usando `!perfil @membro`.\n"
+                    "2. Use `!rep @membro` após concluir a troca.\n"
+                    "3. Se for scammado, abra um ticket de suporte e use `!neg @membro`.\n\n"
+                    "**Para encerrar:** Clique no botão abaixo para excluir este tópico.\n"
+                    "**RMT: Compra ou venda por dinheiro real é PROIBIDO e passivo de banimento.**"
+                ),
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="ARC Raiders Brasil - Sistema de Trocas")
+            
+            # Adicionamos a View com o botão aqui
+            view = FinalizarTrocaView(owner_id=thread.owner_id)
+            await thread.send(embed=embed, view=view)
+            
+        except Exception as e:
+            print(f"❌ Erro ao enviar boas-vindas: {e}")
 
 @bot.event
 async def on_thread_create(thread):
@@ -620,8 +694,15 @@ async def manter_banco_vivo():
 @bot.event
 async def on_ready():
     setup_db()
-    manter_banco_vivo.start() # Inicia o loop quando o bot liga
-    print(f"✅ {bot.user.name} Online e Banco Protegido")
+    
+    # REGISTRO DA VIEW PERSISTENTE
+    bot.add_view(FinalizarTrocaView()) 
+    
+    if not manter_banco_vivo.is_running():
+        manter_banco_vivo.start()
+        
+    print(f"✅ {bot.user.name} Bot Online!")
+    await bot.change_presence(activity=discord.Game(name="!ajuda | ARC Raiders Brasil"))
 
 if __name__ == "__main__":
     setup_db()
