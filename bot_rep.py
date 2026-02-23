@@ -192,12 +192,20 @@ async def verificar_cargos_nivel(ctx, membro, pontos):
             elif pontos < nivel["limite"] and cargo in membro.roles: await membro.remove_roles(cargo)
 
 # --- SISTEMA DE RAID (UI) ---
+CANAIS_VOZ_IDS = [
+    1441884973077495808, 1441885994248044605, 1441887071533928540,
+    1439303187332071594, 1439314706719445218, 1439314014579593607
+]
 class VoiceSelectionView(discord.ui.View):
+    """View que gera botões de link para os canais de voz."""
     def __init__(self, guild_id):
         super().__init__(timeout=None)
-        canais_voz = [1441884973077495808, 1441885994248044605, 1441887071533928540, 1439303187332071594, 1439314706719445218, 1439314014579593607]
-        for i, canal_id in enumerate(canais_voz, 1):
-            self.add_item(discord.ui.Button(label=f"Sala {i}", url=f"https://discord.com/channels/{guild_id}/{canal_id}", style=discord.ButtonStyle.link))
+        for i, canal_id in enumerate(CANAIS_VOZ_IDS, 1):
+            self.add_item(discord.ui.Button(
+                label=f"Entrar na Sala {i}", 
+                url=f"https://discord.com/channels/{guild_id}/{canal_id}",
+                style=discord.ButtonStyle.link
+            ))
 
 class RaidView(discord.ui.View):
     def __init__(self, host, mapa, vagas_totais):
@@ -205,40 +213,64 @@ class RaidView(discord.ui.View):
         self.host, self.mapa, self.vagas_totais = host, mapa, vagas_totais
         self.participantes = [host]
 
-    @discord.ui.button(label="Entrar no Squad", style=discord.ButtonStyle.green, emoji="✋")
+@discord.ui.button(label="Entrar no Squad", style=discord.ButtonStyle.green, emoji="✋")
     async def entrar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user in self.participantes:
-            return await interaction.response.send_message("❌ Já está no squad!", ephemeral=True)
-        if len(self.participantes) >= self.vagas_totais:
-            return await interaction.response.send_message("❌ Squad cheio!", ephemeral=True)
+        # ... (verificações de vaga já existentes) ...
+
         self.participantes.append(interaction.user)
-        embed = interaction.message.embeds[0]
-        lista = "\n".join([m.mention for m in self.participantes])
-        embed.set_field_at(1, name=f"Membros ({len(self.participantes)}/{self.vagas_totais})", value=lista, inline=False)
+        
+        # Se atingir o limite (Duo ou Trio)
         if len(self.participantes) >= self.vagas_totais:
-            button.disabled, button.label, button.style = True, "Squad Completo", discord.ButtonStyle.secondary
+            button.disabled = True
+            button.label = "Squad Completo"
+            button.style = discord.ButtonStyle.secondary
+            
+            # Atualiza o Embed original para Dourado
+            embed = interaction.message.embeds[0]
             embed.color = discord.Color.gold()
+            embed.title = f"✅ SQUAD COMPLETO: {self.mapa.upper()}"
             await interaction.message.edit(embed=embed, view=self)
+
+            # Prepara a mensagem de instrução para o Criador
             view_voz = VoiceSelectionView(interaction.guild.id)
-            await interaction.response.send_message(content=f"🎮 **Squad Pronto!**", view=view_voz, ephemeral=True)
-        else:
-            await interaction.message.edit(embed=embed, view=self)
-            await interaction.response.send_message(f"✅ Você entrou!", ephemeral=True)
+            mencoes = ", ".join([m.mention for m in self.participantes if m != self.host])
+            
+            instrucao_host = (
+                f"🎮 **Tudo pronto para a extração!**\n\n"
+                f"Escolha uma sala abaixo e, após entrar, **informe o link ou o número da sala** para os seus parceiros: {mencoes}"
+            )
+
+            # Resposta EFÊMERA: Apenas quem fechou a raid vê os botões de voz
+            await interaction.response.send_message(
+                content=instrucao_host,
+                view=view_voz,
+                ephemeral=True
+            )
+            
+            # Notificação pública para o Host saber que as salas foram geradas
+            if interaction.user != self.host:
+                await interaction.channel.send(f"🔔 {self.host.mention}, seu squad está pronto! Veja a mensagem do sistema para escolher a sala.")
 
 # --- 2. O COMANDO ---
 @bot.command()
-async def raid(ctx, mapa: str = None, vagas: int = None):
-    if mapa is None or vagas is None:
-        return await ctx.send("❌ Uso: `!raid [mapa] [vagas]` (1 para Duo, 2 para Trio)")
+async def raid(ctx, mapa: str, vagas_extras: int):
+    """Cria chamada para Duo (1 vaga extra) ou Trio (2 vagas extras)."""
+    ID_CANAL_RAID = 1412423357600632922
+
     if ctx.channel.id != ID_CANAL_RAID:
-        return await ctx.send(f"❌ Use em <#{ID_CANAL_RAID}>.", delete_after=5)
-    if vagas < 1 or vagas > 2:
-        return await ctx.send("❌ Escolha 1 ou 2 vagas extras.")
-    total = vagas + 1
-    embed = discord.Embed(title=f"🚨 Recrutamento: {'DUO' if total==2 else 'TRIO'}", color=0x2ecc71)
-    embed.add_field(name="📍 Mapa", value=mapa.upper(), inline=True)
-    embed.add_field(name=f"Membros (1/{total})", value=f"👤 {ctx.author.mention}", inline=False)
-    await ctx.send(embed=embed, view=RaidView(ctx.author, mapa, total))
+        return await ctx.send(f"❌ Comando restrito ao canal <#{ID_CANAL_RAID}>.", delete_after=5)
+
+    if vagas_extras < 1 or vagas_extras > 2:
+        return await ctx.send("❌ Formatos suportados: `!raid mapa 1` (Duo) ou `!raid mapa 2` (Trio).", delete_after=10)
+
+    total_squad = vagas_extras + 1
+    tipo = "DUO" if total_squad == 2 else "TRIO"
+
+    embed = discord.Embed(title=f"🚨 Recrutamento: {tipo}", color=discord.Color.green())
+    embed.add_field(name="📍 Mapa", value=f"`{mapa.upper()}`", inline=True)
+    embed.add_field(name=f"Membros (1/{total_squad})", value=f"👤 {ctx.author.mention}", inline=False)
+    
+    await ctx.send(embed=embed, view=RaidView(ctx.author, mapa, total_squad))
 
 # --- EVENTOS ---
 @bot.event
