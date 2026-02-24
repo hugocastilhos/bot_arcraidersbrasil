@@ -427,7 +427,7 @@ async def on_thread_create(thread):
                     "**Dicas de Segurança:**\n"
                     "1. Verifique a reputação de alguém usando o comando `!perfil @membro` antes fazer uma troca.\n"
                     "2. Use o comando `!rep @membro` apenas após a troca ser concluída com sucesso.\n"
-                    "3. Após a troca for concluída, clique no botão para finalizar e fechar o tópico abaixo.\n"
+                    "3. Após finalizada a troca, clique abaixo no botão para finalizar e excluir o tópico.\n"
                     "4. Se por acaso for scammado, abra um ticket acionando nossos mods imediatamente e use o comando `!neg @membro` para negativar o raider.\n\n"
                     "***RMT: Compra e venda de itens com dinheiro real é PROIBIDO e passivo de banimento aqui e no jogo, cuida.***\n\n"
                 ),
