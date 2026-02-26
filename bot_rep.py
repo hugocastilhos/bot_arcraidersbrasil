@@ -332,6 +332,36 @@ async def resetar(ctx, membro: discord.Member):
     await enviar_log(ctx, f"♻️ **Reset de Reputação**\nAlvo: {membro.mention}", 0x95a5a6)
     await verificar_cargos_nivel(ctx, membro, nova)
 
+@bot.command(aliases=['clear', 'purge'])
+@eh_staff()
+async def limpar(ctx, quantidade: int = None):
+    # Verifica se a quantidade foi informada
+    if quantidade is None:
+        return await ctx.send("❌ Uso correto: `!limpar [quantidade]` (ex: `!limpar 10`)", delete_after=5)
+
+    # Limite de segurança para evitar abusos ou bugs do Discord
+    if quantidade < 1 or quantidade > 100:
+        return await ctx.send("❌ Podes limpar entre 1 e 100 mensagens de cada vez.", delete_after=5)
+
+    try:
+        # O purge apaga as mensagens. O +1 é para apagar também a mensagem do comando !limpar
+        deleted = await ctx.channel.purge(limit=quantidade + 1)
+        
+        # Envia uma confirmação que será apagada em 5 segundos
+        confirmacao = await ctx.send(f"🧹 **Faxina concluída!** `{len(deleted)-1}` mensagens foram removidas.")
+        
+        # Regista a ação nos logs do servidor
+        await enviar_log(ctx, f"🧹 **Limpeza de Chat**\n**Canal:** {ctx.channel.mention}\n**Quantidade:** {len(deleted)-1} mensagens.", 0x3498db)
+        
+        await asyncio.sleep(5)
+        await confirmacao.delete()
+        
+    except discord.Forbidden:
+        await ctx.send("❌ Erro: Eu não tenho permissão para 'Gerenciar Mensagens'.")
+    except Exception as e:
+        print(f"Erro no comando limpar: {e}")
+        await ctx.send(f"❌ Ocorreu um erro ao tentar limpar o chat.")
+
 @bot.command()
 @eh_staff()
 async def colocar_botao(ctx):
