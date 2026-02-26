@@ -83,20 +83,18 @@ async def enviar_log(origem, mensagem, cor=0xffa500):
         await canal.send(embed=embed)
 
 # --- CHECKS (VERIFICAÇÕES) ---
-# --- CHECKS (VERIFICAÇÕES) CORRIGIDO ---
 @bot.check
 async def verificar_canal(ctx):
     if isinstance(ctx.channel, discord.DMChannel): 
         return False
     
+    # Staff pode usar comandos em qualquer canal
     is_admin = ctx.author.guild_permissions.administrator
     is_mod = any(role.name.lower() == "mods" for role in ctx.author.roles)
-    
-    # Se for Staff, permitimos o uso em QUALQUER canal (ajuda no !say e manutenção)
     if is_admin or is_mod:
         return True
     
-    # Para usuários comuns, mantemos as restrições originais
+    # Usuários comuns só nos canais permitidos
     parent_id = getattr(ctx.channel, "parent_id", None)
     no_forum_troca = (ctx.channel.id == ID_FORUM_TROCA or parent_id == ID_FORUM_TROCA)
     no_canal_raid = (ctx.channel.id == ID_CANAL_RAID)
@@ -258,13 +256,27 @@ async def top(ctx):
 @commands.cooldown(1, 7200, commands.BucketType.user)
 @ignora_cooldown_staff()
 async def rep(ctx, membro: discord.Member):
-    if membro.id == ctx.author.id or membro.bot:
+    if membro.id == ctx.author.id:
         ctx.command.reset_cooldown(ctx)
-        return await ctx.send("❌ Você não pode dar reputação para si mesmo ou bots.")
-    nova = alterar_rep(membro.id, 1)
-    await ctx.send(f"🌟 {ctx.author.mention} deu +1 rep para {membro.mention}!")
-    await enviar_log(ctx, f"🌟 **Reputação Positiva**\nPara: {membro.mention}\nTotal: `{nova}`", 0x2ecc71)
-    await verificar_cargos_nivel(ctx, membro, nova)
+        return await ctx.send("❌ Você não pode dar reputação para si mesmo.")
+    
+    if membro.bot:
+        ctx.command.reset_cooldown(ctx)
+        return await ctx.send("❌ Bots não possuem reputação.")
+
+    try:
+        nova = alterar_rep(membro.id, 1)
+        if nova is not None:
+            await ctx.send(f"🌟 {ctx.author.mention} deu +1 rep para {membro.mention}!")
+            await enviar_log(ctx, f"🌟 **Reputação Positiva**\nPara: {membro.mention}\nTotal: `{nova}`", 0x2ecc71)
+            await verificar_cargos_nivel(ctx, membro, nova)
+        else:
+            ctx.command.reset_cooldown(ctx)
+            await ctx.send("❌ Erro ao salvar no banco de dados. Verifique a conexão.")
+    except Exception as e:
+        print(f"Erro no comando !rep: {e}")
+        ctx.command.reset_cooldown(ctx)
+        await ctx.send("❌ Ocorreu um erro interno ao processar a reputação.")
 
 @bot.command()
 @commands.cooldown(1, 7200, commands.BucketType.user)
