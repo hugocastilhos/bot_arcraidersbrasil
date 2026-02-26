@@ -83,18 +83,24 @@ async def enviar_log(origem, mensagem, cor=0xffa500):
         await canal.send(embed=embed)
 
 # --- CHECKS (VERIFICAÇÕES) ---
+# --- CHECKS (VERIFICAÇÕES) CORRIGIDO ---
 @bot.check
 async def verificar_canal(ctx):
     if isinstance(ctx.channel, discord.DMChannel): 
         return False
+    
     is_admin = ctx.author.guild_permissions.administrator
     is_mod = any(role.name.lower() == "mods" for role in ctx.author.roles)
+    
+    # Se for Staff, permitimos o uso em QUALQUER canal (ajuda no !say e manutenção)
+    if is_admin or is_mod:
+        return True
+    
+    # Para usuários comuns, mantemos as restrições originais
     parent_id = getattr(ctx.channel, "parent_id", None)
     no_forum_troca = (ctx.channel.id == ID_FORUM_TROCA or parent_id == ID_FORUM_TROCA)
-    no_canal_staff = (ctx.channel.id == ID_CANAL_STAFF)
     no_canal_raid = (ctx.channel.id == ID_CANAL_RAID)
-    if is_admin or is_mod:
-        return no_forum_troca or no_canal_staff or no_canal_raid
+    
     return no_forum_troca or no_canal_raid
 
 def eh_staff():
@@ -324,18 +330,29 @@ async def colocar_botao(ctx):
 
 @bot.command()
 @eh_staff()
-async def say(ctx, canal_ou_msg=None, *, mensagem: str = None):
-    if canal_ou_msg and canal_ou_msg.startswith('<#'):
+async def say(ctx, canal_destinatario=None, *, mensagem: str = None):
+    # Se o primeiro argumento for uma menção de canal ou ID numérico
+    if canal_destinatario:
+        # Tenta converter para um canal de texto
         try:
-            target_channel = await commands.TextChannelConverter().convert(ctx, canal_ou_msg)
+            converter = commands.TextChannelConverter()
+            target_channel = await converter.convert(ctx, canal_destinatario)
             msg_final = mensagem
         except:
-            target_channel, msg_final = ctx.channel, f"{canal_ou_msg} {mensagem or ''}"
+            # Se falhar a conversão, assume que o primeiro argumento já era parte da mensagem
+            target_channel = ctx.channel
+            msg_final = f"{canal_destinatario} {mensagem if mensagem else ''}"
     else:
-        target_channel, msg_final = ctx.channel, f"{canal_ou_msg} {mensagem or ''}".strip()
-    if not msg_final or msg_final == "None": return await ctx.send("❌ Você precisa digitar uma mensagem!")
-    try: await ctx.message.delete()
-    except: pass
+        return await ctx.send("❌ Uso: `!say [#canal] [mensagem]` ou `!say [mensagem]`")
+
+    if not msg_final or msg_final.strip() == "":
+        return await ctx.send("❌ Você precisa digitar uma mensagem!")
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
     await target_channel.send(msg_final)
     await enviar_log(ctx, f"📢 **Comando !say**\n**Canal:** {target_channel.mention}\n**Conteúdo:** {msg_final}", 0x9b59b6)
 
