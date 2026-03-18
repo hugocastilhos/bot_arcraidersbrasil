@@ -53,7 +53,13 @@ def setup_db():
     if conn:
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id BIGINT PRIMARY KEY, rep INTEGER DEFAULT 0, ultima_rep TIMESTAMP)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS blacklist (user_id BIGINT PRIMARY KEY, motivo TEXT, staff_id BIGINT, data_blacklist TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        # Adicionada a coluna "tipo" (TEXT) para diferenciar Scam de Hack
+        cursor.execute('''CREATE TABLE IF NOT EXISTS blacklist (
+            user_id BIGINT PRIMARY KEY, 
+            motivo TEXT, 
+            staff_id BIGINT, 
+            tipo TEXT DEFAULT 'scam', 
+            data_blacklist TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         conn.commit()
         cursor.close()
         conn.close()
@@ -295,25 +301,36 @@ async def perfil(ctx, membro: discord.Member = None):
     membro = membro or ctx.author
     conn = get_db_connection()
     cursor = conn.cursor()
+    
     cursor.execute('SELECT rep FROM usuarios WHERE id = %s', (membro.id,))
     res_rep = cursor.fetchone()
     pontos = res_rep[0] if res_rep else 0
-    cursor.execute('SELECT motivo FROM blacklist WHERE user_id = %s', (membro.id,))
+    
+    # Busca o motivo e o TIPO do banimento
+    cursor.execute('SELECT motivo, tipo FROM blacklist WHERE user_id = %s', (membro.id,))
     res_black = cursor.fetchone()
     conn.close()
+
     if res_black:
-        embed = discord.Embed(title=f"⚠️ PERFIL DE RISCO: {membro.name} ⚠️", color=0xff0000)
-        embed.description = f"🚨 **ESTE USUÁRIO ESTÁ NA LISTA NEGRA!**\n**Motivo:** {res_black[0]}"
-        embed.add_field(name="Reputação", value="BLOQUEADA", inline=True)
+        motivo, tipo = res_black
+        cor = 0x000000 if tipo == 'hack' else 0xff0000 # Preto para hack, vermelho para scam
+        titulo = "🛑 PERFIL BLOQUEADO: HACKER 🛑" if tipo == 'hack' else "⚠️ RISCO: SCAMMER ⚠️"
+        
+        embed = discord.Embed(title=titulo, color=cor)
+        embed.description = f"🚨 **ESTE USUÁRIO FOI DENUNCIADO!**\n\n**Tipo de Infração:** `{tipo.upper()}`\n**Motivo:** {motivo}"
+        embed.add_field(name="Status", value="BANIDO DA COMUNIDADE", inline=True)
     else:
+        # Lógica normal de trocador (mantém seu código atual aqui)
         status = "Neutro"
         if pontos >= 100: status = "Trocador Oficial 💎"
         elif pontos >= 50: status = "Trocador Confiável ✅"
         elif pontos >= 10: status = "Trocador Iniciante ✅"
         elif pontos <= -10: status = "Trocador Perigoso ❌"
+        
         embed = discord.Embed(title=f"Perfil de {membro.name}", color=0x2ecc71)
         embed.add_field(name="Pontos de Reputação", value=f"`{pontos}`", inline=True)
         embed.add_field(name="Status", value=status, inline=True)
+
     embed.set_thumbnail(url=membro.display_avatar.url)
     await ctx.send(embed=embed)
 
@@ -364,6 +381,52 @@ async def limpar(ctx, quantidade: int = None):
 
 @bot.command()
 @eh_staff()
+async def status(ctx):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Conta usuários e blacklist
+    cursor.execute('SELECT COUNT(*) FROM usuarios')
+    total_users = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM blacklist')
+    total_black = cursor.fetchone()[0]
+    conn.close()
+    
+    membros_totais = ctx.guild.member_count
+    
+    embed = discord.Embed(title="📊 Status do Setor", color=0x2ecc71)
+    embed.add_field(name="👥 Membros no Servidor", value=f"`{membros_totais}`", inline=True)
+    embed.add_field(name="🗄️ Registos no DB", value=f"`{total_users}`", inline=True)
+    embed.add_field(name="🚫 Raiders na Blacklist", value=f"`{total_black}`", inline=True)
+    embed.set_footer(text=f"Latência: {round(bot.latency * 1000)}ms")
+    
+    await ctx.send(embed=embed)
+
+@bot.command()
+@eh_staff()
+async def avisar(ctx, membro: discord.Member, *, motivo: str = "Não especificado"):
+    if membro.bot:
+        return await ctx.send("❌ Não podes avisar bots.")
+    
+    embed = discord.Embed(title="⚠️ Advertência de Staff", color=0xffa500)
+    embed.add_field(name="Raider Avisado", value=membro.mention, inline=True)
+    embed.add_field(name="Staff", value=ctx.author.mention, inline=True)
+    embed.add_field(name="Motivo", value=motivo, inline=False)
+    embed.set_footer(text="Por favor, mantenha a ordem na comunidade!")
+    
+    await ctx.send(content=membro.mention, embed=embed)
+    
+    # Envia para os logs
+    await enviar_log(ctx, f"⚠️ **Warn Aplicado**\n**Alvo:** {membro.mention}\n**Motivo:** {motivo}", 0xffa500)
+    
+    try:
+        await membro.send(f"Olá {membro.name}, você recebeu um aviso oficial no **ARC Raiders Brasil**.\n**Motivo:** {motivo}")
+    except:
+        pass # Ignora se o DM do usuário estiver fechado
+
+@bot.command()
+@eh_staff()
 async def colocar_botao(ctx):
     if isinstance(ctx.channel, discord.Thread):
         await ctx.send("Clique abaixo para finalizar esta troca:", view=FinalizarTrocaView())
@@ -400,20 +463,41 @@ async def say(ctx, canal_destinatario=None, *, mensagem: str = None):
 
 @bot.command()
 @eh_staff()
-async def denunciar(ctx, membro: discord.Member, *, motivo: str):
+async def denunciar(ctx, membro: discord.Member, tipo: str, *, motivo: str):
+    # Padroniza o tipo
+    tipo = tipo.lower()
+    if tipo not in ['scam', 'hack', 'outros']:
+        return await ctx.send("❌ Tipo inválido! Use: `scam`, `hack` ou `outros`.\nEx: `!denunciar @membro hack Usou aimbot na extração`")
+
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('INSERT INTO blacklist (user_id, motivo, staff_id) VALUES (%s, %s, %s) ON CONFLICT (user_id) DO UPDATE SET motivo = EXCLUDED.motivo', (membro.id, motivo, ctx.author.id))
+        cursor.execute('''
+            INSERT INTO blacklist (user_id, motivo, staff_id, tipo) 
+            VALUES (%s, %s, %s, %s) 
+            ON CONFLICT (user_id) DO UPDATE SET motivo = EXCLUDED.motivo, tipo = EXCLUDED.tipo
+        ''', (membro.id, motivo, ctx.author.id, tipo))
+        
         conn.commit()
         alterar_rep(membro.id, -999, definir=True)
-        embed = discord.Embed(title="🚫 Usuário Banido das Trocas", color=0xff0000)
+
+        # Embed customizada dependendo do crime
+        cor = 0xff0000 if tipo == 'hack' else 0xe67e22
+        emoji = "🚫" if tipo == 'hack' else "📦"
+        
+        embed = discord.Embed(title=f"{emoji} Raider Banido: {tipo.upper()}", color=cor)
         embed.add_field(name="Membro", value=membro.mention, inline=True)
-        embed.add_field(name="Motivo", value=motivo, inline=True)
+        embed.add_field(name="Staff", value=ctx.author.mention, inline=True)
+        embed.add_field(name="Motivo", value=motivo, inline=False)
+        embed.set_footer(text="Segurança ARC Raiders Brasil")
+        
         await ctx.send(embed=embed)
-        await enviar_log(ctx, f"🚫 **BLACK-LIST**\nAlvo: {membro.mention}\nMotivo: {motivo}", 0xff0000)
-    except Exception as e: await ctx.send(f"❌ Erro: {e}")
-    finally: conn.close()
+        await enviar_log(ctx, f"🚨 **BLACK-LIST GLOBAL**\n**Alvo:** {membro.mention}\n**Tipo:** {tipo}\n**Motivo:** {motivo}", cor)
+        
+    except Exception as e: 
+        await ctx.send(f"❌ Erro ao processar denúncia: {e}")
+    finally: 
+        conn.close()
 
 @bot.command()
 @eh_staff()
