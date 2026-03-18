@@ -214,17 +214,71 @@ class RaidView(discord.ui.View):
 # --- COMANDOS ---
 @bot.command()
 async def ajuda(ctx):
-    embed = discord.Embed(title="📖 Lista de Comandos", color=discord.Color.blue())
-    embed.add_field(name="🌟 `!rep @membro`", value="Dá +1 de reputação.", inline=True)
-    embed.add_field(name="💢 `!neg @membro`", value="Dá -1 de reputação.", inline=True)
-    embed.add_field(name="👤 `!perfil @membro`", value="Ver reputação.", inline=True)
-    embed.add_field(name="📡 `!raid mapa/objetivo 1`", value="Cria uma raid para duo.", inline=True)
-    embed.add_field(name="📡 `!raid mapa/objetivo 2`", value="Cria uma raid para trio.", inline=True)
-    embed.add_field(name="🏆 `!top`", value="Ver o ranking dos 10 melhores trocadores.", inline=True)
-    if any(role.name.lower() == "mods" for role in ctx.author.roles) or ctx.author.guild_permissions.administrator:
-        embed.add_field(name="🛠️ Staff", value="`!setrep`, `!resetar`, `!say`, `!backup`, `!denunciar`, `!perdoar`, `!colocar_botao` ", inline=False)
-    embed.set_footer(text="Developer: fugazzeto | Sponsor: ! Gio | ARC Raiders Brasil")
-    await ctx.send(embed=embed)
+    # Tenta apagar a mensagem do usuário para limpar o chat
+    try: await ctx.message.delete()
+    except: pass
+
+    embed = discord.Embed(
+        title="🛰️ TERMINAL DE SUPORTE - ARC RAIDERS BRASIL",
+        description=(
+            "Bem-vindo ao sistema de auxílio automatizado. Abaixo estão os protocolos disponíveis para todos os raiders.\n\n"
+            "**PS:** Comandos de troca funcionam apenas no canal de trocas."
+        ),
+        color=0x3498db # Azul tático
+    )
+
+    # --- CATEGORIA: SOBREVIVÊNCIA & TROCAS ---
+    embed.add_field(
+        name="📦 SISTEMA DE TROCAS",
+        value=(
+            "🌟 `!rep @membro` - Dá +1 de reputação positiva.\n"
+            "💢 `!neg @membro` - Dá -1 de reputação negativa.\n"
+            "👤 `!perfil @membro` - Consulta a ficha e o status do raider.\n"
+            "🏆 `!top` - Exibe os 10 raiders mais confiáveis para trocas."
+        ),
+        inline=False
+    )
+
+    # --- CATEGORIA: SQUAD & EXPLORAÇÃO ---
+    embed.add_field(
+        name="📡 COMUNICAÇÃO DE RAID",
+        value=(
+            "🚨 `!raid [mapa] 1` - Abre chamada para **DUO**.\n"
+            "🚨 `!raid [mapa] 2` - Abre chamada para **TRIO**.\n"
+            "📩 `!postar_suporte` - Abre um ticket privado com a Staff."
+        ),
+        inline=False
+    )
+
+    # --- CATEGORIA: STAFF (SÓ APARECE SE FOR MOD/ADM) ---
+    is_mod = any(role.name.lower() == "mods" for role in ctx.author.roles)
+    is_admin = ctx.author.guild_permissions.administrator
+
+    if is_mod or is_admin:
+        embed.add_field(
+            name="🛠️ PROTOCOLOS DE COMANDO (STAFF)",
+            value=(
+                "📢 `!falar [texto/embed] [msg]` - Anúncios oficiais.\n"
+                "🧹 `!limpar [n]` - Faxina rápida no canal.\n"
+                "🚨 `!denunciar @membro [tipo] [motivo]` - Blacklist global.\n"
+                "📜 `!postar_regras` - Mural de diretrizes com botão.\n"
+                "⚙️ `!status` - Saúde do banco de dados e do bot."
+            ),
+            inline=False
+        )
+
+    # Identidade Visual
+    if ctx.guild.icon:
+        embed.set_thumbnail(url=ctx.guild.icon.url)
+    
+    embed.set_footer(
+        text=f"Developer: {ctx.author.name} | Sponsor: ! Gio • ARC Raiders Brasil", 
+        icon_url=ctx.author.display_avatar.url
+    )
+
+    # Envia a ajuda apenas para quem pediu (evita flood no chat geral)
+    # Ou retire o 'delete_after' se preferir que fique fixo
+    await ctx.send(embed=embed, delete_after=60)
 
 @bot.command()
 async def raid(ctx, mapa: str = None, vagas: int = None):
@@ -437,11 +491,6 @@ async def colocar_botao(ctx):
 @bot.command(aliases=['say', 'say2', 'anuncio'])
 @eh_staff()
 async def falar(ctx, tipo: str, *, mensagem: str = None):
-    """
-    Uso: 
-    !falar texto [mensagem] (com imagem anexada)
-    !falar embed "Título" [mensagem] (com imagem anexada)
-    """
     # 1. Verifica se há conteúdo ou imagem
     tem_anexo = len(ctx.message.attachments) > 0
     if not mensagem and not tem_anexo:
@@ -449,35 +498,29 @@ async def falar(ctx, tipo: str, *, mensagem: str = None):
 
     tipo = tipo.lower()
     
-    # 2. Captura a imagem antes de apagar a mensagem
-    arquivo_para_enviar = None
-    url_da_imagem = None
-    
+    # Prepara o arquivo para re-envio (evita que o link quebre ao deletar a msg)
+    arquivo_copy = None
     if tem_anexo:
-        # Pega a URL para o Embed ou o arquivo para o modo Texto
-        url_da_imagem = ctx.message.attachments[0].url
-        arquivo_para_enviar = await ctx.message.attachments[0].to_file()
+        arquivo_copy = await ctx.message.attachments[0].to_file()
 
-    # 3. Tenta apagar o comando original
+    # 3. Apaga o comando original
     try: await ctx.message.delete()
     except: pass
 
     # --- MODO TEXTO ---
     if tipo == "texto":
-        # Se tiver imagem, envia o arquivo junto com o texto
         texto_final = f"{mensagem if mensagem else ''}\n\n_Enviado por: {ctx.author.mention}_"
-        await ctx.send(content=texto_final, file=arquivo_para_enviar)
+        await ctx.send(content=texto_final, file=arquivo_copy)
         await enviar_log(ctx, f"📢 **Msg Texto** em {ctx.channel.mention}", 0x9b59b6)
 
     # --- MODO EMBED ---
     elif tipo == "embed":
-        # Lógica de Título entre aspas
         if mensagem and '"' in mensagem:
             partes = mensagem.split('"', 2)
             titulo = partes[1]
             conteudo = partes[2].strip()
         else:
-            titulo = "Informativo ARC Raiders"
+            titulo = "Informativo ARC Raiders Brasil"
             conteudo = mensagem if mensagem else ""
 
         embed = discord.Embed(title=f"📢 {titulo}", description=conteudo, color=0xf1c40f)
@@ -485,13 +528,16 @@ async def falar(ctx, tipo: str, *, mensagem: str = None):
         if ctx.guild.icon:
             embed.set_author(name="Comunidade ARC Raiders Brasil", icon_url=ctx.guild.icon.url)
         
-        # O segredo: Setamos a URL da imagem no Embed
-        if url_da_imagem:
-            embed.set_image(url=url_da_imagem)
-            
         embed.set_footer(text=f"Staff: {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
-        
-        await ctx.send(content="@everyone", embed=embed)
+
+        # Se tiver imagem, anexamos o arquivo e referenciamos no Embed
+        if arquivo_copy:
+            # O nome do arquivo no anexo deve ser o mesmo usado no set_image
+            embed.set_image(url=f"attachment://{arquivo_copy.filename}")
+            await ctx.send(content="@everyone", embed=embed, file=arquivo_copy)
+        else:
+            await ctx.send(content="@everyone", embed=embed)
+            
         await enviar_log(ctx, f"📢 **Anúncio Embed** em {ctx.channel.mention}\nTítulo: {titulo}", 0xf1c40f)
 
     else:
