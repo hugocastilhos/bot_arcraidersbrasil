@@ -261,7 +261,7 @@ async def ajuda(ctx):
                 "📢 `!falar [texto/embed] [msg]` - Anúncios oficiais.\n"
                 "🧹 `!limpar [n]` - Faxina rápida no canal.\n"
                 "🚨 `!denunciar @membro [tipo] [motivo]` - Blacklist global.\n"
-                "📜 `!postar_regras` - Mural de diretrizes com botão.\n"
+                "📜 `!setrep @membro [pontos]` - Alterar reputação de algum raider.\n"
                 "⚙️ `!status` - Saúde do banco de dados e do bot."
             ),
             inline=False
