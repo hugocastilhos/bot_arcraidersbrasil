@@ -427,6 +427,16 @@ async def avisar(ctx, membro: discord.Member, *, motivo: str = "Não especificad
 
 @bot.command()
 @eh_staff()
+async def say2(ctx, titulo: str, *, mensagem: str):
+    embed = discord.Embed(title=f"📢 {titulo}", description=mensagem, color=0xf1c40f)
+    embed.set_author(name="Comunidade ARC Raiders Brasil", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
+    embed.set_footer(text=f"Enviado por: {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+    
+    await ctx.message.delete() # Apaga o comando !say2 para limpar o chat
+    await ctx.send(content="@everyone", embed=embed)
+
+@bot.command()
+@eh_staff()
 async def colocar_botao(ctx):
     if isinstance(ctx.channel, discord.Thread):
         await ctx.send("Clique abaixo para finalizar esta troca:", view=FinalizarTrocaView())
