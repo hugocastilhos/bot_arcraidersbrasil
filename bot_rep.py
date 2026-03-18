@@ -814,11 +814,11 @@ class AbrirTicketView(discord.ui.View):
             title="🛰️ Central de Suporte - ARC Raiders Brasil",
             description=(
                 f"Olá {user.mention}, favor ler abaixo e explicar a sua situação.\n\n"
-                "*- Caso tenha aberto o ticket por engano favor informar.* \n"
-                "*- Para denúncias:** Informar o ocorrido, enviar prints/vídeos e o ID (discord) do suspeito.* \n"
-                "*- Para bugs/suporte ao jogo: Logue com sua Embark ID e abra um ticket no link: https://id.embark.games/pt-BR/arc-raiders/support * \n\n"
-                "- Para as denúncias, as medidas serão tomadas apenas caso tenha provas consistentes e concretas sobre o assunto abordado. \n"
-                "- Aguarde um membro da staff entrar em contato."
+                "*Caso tenha aberto o ticket por engano favor informar.* \n"
+                "*Para denúncias:** Informar o ocorrido, enviar prints/vídeos e o ID (discord) do suspeito.* \n"
+                "*Para bugs/suporte ao jogo: Logue com sua Embark ID e abra um ticket no link: https://id.embark.games/pt-BR/arc-raiders/support * \n\n"
+                "Para as denúncias, as medidas serão tomadas apenas caso tenha provas consistentes e concretas sobre o assunto abordado. \n"
+                "Aguarde um membro da staff entrar em contato."
                 ),
                 color=0x3498db
             )
