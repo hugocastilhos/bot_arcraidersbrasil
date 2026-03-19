@@ -714,23 +714,28 @@ class RegrasView(discord.ui.View):
         except discord.Forbidden:
             await interaction.response.send_message("❌ Eu não tenho permissão para dar cargos. Verifique minha posição na lista de cargos!", ephemeral=True)
 
-class ConfirmarFecharTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+class MotivoFecharTicketModal(discord.ui.Modal, title='Encerrar Atendimento'):
+    motivo = discord.ui.TextInput(
+        label='Motivo do fechamento',
+        style=discord.TextStyle.paragraph,
+        placeholder='Ex: Dúvida tirada / Jogador banido por cheat / Spam...',
+        required=True,
+        min_length=5,
+        max_length=300
+    )
 
-    @discord.ui.button(label="Sim, Fechar Ticket", style=discord.ButtonStyle.danger, custom_id="btn_confirmar_fechar")
-    async def confirmar_fechar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("🔒 Gerando transcrição e fechando ticket...")
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.send_message("🔒 Gerando transcrição e encerrando ticket...", ephemeral=True)
         
         canal_ticket = interaction.channel
         
         # --- GERAR TRANSCRIÇÃO ---
         log_content = f"--- TRANSCRIÇÃO DE TICKET: {canal_ticket.name} ---\n"
-        log_content += f"Data de Fechamento: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+        log_content += f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
         log_content += f"Fechado por: {interaction.user.name}\n"
+        log_content += f"MOTIVO: {self.motivo.value}\n" # <--- O motivo do Pop-up entra aqui
         log_content += "------------------------------------------\n\n"
 
-        # Pega as últimas 500 mensagens do ticket
         async for msg in canal_ticket.history(limit=500, oldest_first=True):
             timestamp = msg.created_at.strftime('%d/%m/%Y %H:%M')
             log_content += f"[{timestamp}] {msg.author.name}: {msg.content}\n"
@@ -738,12 +743,11 @@ class ConfirmarFecharTicketView(discord.ui.View):
                 for att in msg.attachments:
                     log_content += f"   > Anexo: {att.url}\n"
 
-        # Transforma o texto em um arquivo para o Discord
         buffer = io.BytesIO(log_content.encode('utf-8'))
         arquivo_log = discord.File(fp=buffer, filename=f"log_{canal_ticket.name}.txt")
 
-        # Envia o log para o canal de LOG_CHANNEL_ID definido no seu .env
-        await enviar_log(interaction, f"🔒 **Ticket Encerrado**\nCanal: `{canal_ticket.name}`\nExecutor: {interaction.user.mention}", 0xe74c3c)
+        # Log no canal de monitoramento
+        await enviar_log(interaction, f"🔒 **Ticket Encerrado**\nCanal: `{canal_ticket.name}`\nExecutor: {interaction.user.mention}\n**Motivo:** {self.motivo.value}", 0xe74c3c)
         
         canal_logs = bot.get_channel(LOG_CHANNEL_ID)
         if canal_logs:
@@ -756,14 +760,16 @@ class TicketControlView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Fechar ticket", style=discord.ButtonStyle.secondary, emoji="🔒", custom_id="btn_fechar_ticket")
+    @discord.ui.button(label="Fechar Ticket", style=discord.ButtonStyle.secondary, emoji="🔒", custom_id="btn_fechar_ticket")
     async def fechar_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Apenas staff ou o dono do ticket podem clicar
+        # Verifica se é Staff
         is_staff = any(role.name.lower() == "mods" for role in interaction.user.roles) or interaction.user.guild_permissions.administrator
+        
         if not is_staff:
-            return await interaction.response.send_message("❌ Apenas a staff pode encerrar o ticket.", ephemeral=True)
+            return await interaction.response.send_message("❌ Apenas a Staff pode encerrar tickets.", ephemeral=True)
             
-        await interaction.response.send_message("⚠️ Tem certeza que deseja fechar este atendimento?", view=ConfirmarFecharTicketView(), ephemeral=True)
+        # Chama o Pop-up (Modal)
+        await interaction.response.send_modal(MotivoFecharTicketModal())
 
 class AbrirTicketView(discord.ui.View):
     def __init__(self):
