@@ -765,7 +765,7 @@ async def colocar_botao(ctx):
     imagem="Anexe uma imagem para o anúncio",
     marcar_everyone="Deseja marcar @everyone?"
 )
-@eh_staff_slash() # Ajuste seu decorador de staff para suportar Interaction
+@eh_staff() # Ajuste seu decorador de staff para suportar Interaction
 async def falar(
     interaction: discord.Interaction, 
     tipo: str, 
