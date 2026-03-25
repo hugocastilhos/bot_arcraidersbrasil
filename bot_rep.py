@@ -30,6 +30,12 @@ LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
 ID_FORUM_TROCA = 1434310955004592360
 ID_CANAL_STAFF = 1412423356946317350
 ID_CANAL_RAID = 1412423357600632922
+# IDs dos Canais que criam as salas (os gatilhos)
+ID_HUB_DUO = 1486348560822960128  # Canal "➕ Criar DUO"
+ID_HUB_TRIO = 1486348629550825653 # Canal "➕ Criar TRIO"
+# IDs das Categorias onde as salas serão criadas
+ID_CAT_DUO = 1486347910885937242   # Categoria para DUOS
+ID_CAT_TRIO = 1486348090741883114  # Categoria para TRIOS
 
 if not TOKEN:
     print("❌ ERRO: DISCORD_TOKEN não encontrado!")
@@ -682,8 +688,8 @@ async def on_ready():
     # Registrando todas as views persistentes
     bot.add_view(FinalizarTrocaView()) 
     bot.add_view(RegrasView())
-    bot.add_view(AbrirTicketView()) # <--- NOVO
-    bot.add_view(TicketControlView()) # <--- NOVO
+    bot.add_view(AbrirTicketView())
+    bot.add_view(TicketControlView())
     
     if not manter_banco_vivo.is_running():
         manter_banco_vivo.start()
@@ -779,7 +785,7 @@ class AbrirTicketView(discord.ui.View):
     async def abrir_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
-        id_categoria_ticket = 1432701386738499666 # <--- O ID que você informou
+        id_categoria_ticket = 1432701386738499666
         
         # Nome do canal do ticket
         nome_canal = f"ticket-{user.name}".lower()
@@ -822,7 +828,7 @@ class AbrirTicketView(discord.ui.View):
                 f"Olá {user.mention}, favor ler abaixo e explicar a sua situação.\n\n"
                 "*Caso tenha aberto o ticket por engano favor informar.* \n"
                 "*Para denúncias:** Informar o ocorrido, enviar prints/vídeos e o ID (discord) do suspeito.* \n"
-                "*Para bugs/suporte ao jogo: Logue com sua Embark ID e abra um ticket no link: https://id.embark.games/pt-BR/arc-raiders/support * \n\n"
+                "*Para bugs/suporte ao jogo: Logue com sua Embark ID e abra um ticket no link:* https://id.embark.games/pt-BR/arc-raiders/support \n\n"
                 "Para as denúncias, as medidas serão tomadas apenas caso tenha provas consistentes e concretas sobre o assunto abordado. \n"
                 "Aguarde um membro da staff entrar em contato."
                 ),
@@ -836,6 +842,68 @@ class AbrirTicketView(discord.ui.View):
 
         except Exception as e:
             await interaction.response.send_message(f"❌ Erro ao criar ticket: {e}", ephemeral=True)
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # --- 1. DETECÇÃO DE ENTRADA NOS HUBS ---
+    if after.channel and after.channel.id in [ID_HUB_DUO, ID_HUB_TRIO]:
+        guild = member.guild
+        
+        # Define configurações baseado no canal de entrada
+        if after.channel.id == ID_HUB_DUO:
+            categoria_alvo = guild.get_channel(ID_CAT_DUO)
+            limite = 2
+            prefixo = "🛰️ DUO"
+        else:
+            categoria_alvo = guild.get_channel(ID_CAT_TRIO)
+            limite = 3
+            prefixo = "🛸 TRIO"
+
+        # Se a categoria não existir, o bot avisa no console
+        if not categoria_alvo:
+            print(f"❌ Erro: Categoria não encontrada para o canal {after.channel.name}")
+            return
+
+        # Permissões: O criador vira o "Dono" da sala
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(connect=True),
+            member: discord.PermissionOverwrite(
+                manage_channels=True,    # Alterar nome/status/limite
+                move_members=True,       # Expulsar intrusos do voice
+                mute_members=True,       # Silenciar membros
+                manage_permissions=True, # Trancar o canal (remover permissão de Connect)
+                priority_speaker=True    # Voz prioritária
+            ),
+            guild.me: discord.PermissionOverwrite(manage_channels=True, connect=True, move_members=True)
+        }
+
+        # Cria o canal na categoria correta
+        novo_canal = await guild.create_voice_channel(
+            name=f"{prefixo}: {member.name}",
+            category=categoria_alvo,
+            user_limit=limite,
+            overwrites=overwrites,
+            reason=f"Squad dinâmico criado para {member.name}"
+        )
+
+        # Move o jogador para a nova sala
+        await member.move_to(novo_canal)
+
+    # --- 2. SISTEMA DE LIMPEZA (AUTO-DELETE) ---
+    # Verifica se o canal que o membro saiu é um canal dinâmico e se ficou vazio
+    if before.channel:
+        # Verifica se o canal pertence a uma das categorias de Squad
+        if before.channel.category_id in [ID_CAT_DUO, ID_CAT_TRIO]:
+            # Proteção: Não deleta os canais HUB (gatilhos)
+            if before.channel.id not in [ID_HUB_DUO, ID_HUB_TRIO]:
+                # Se não houver mais ninguém, deleta
+                if len(before.channel.members) == 0:
+                    try:
+                        await before.channel.delete(reason="Squad vazio - Limpeza automática.")
+                    except discord.NotFound:
+                        pass # Canal já foi deletado
+                    except Exception as e:
+                        print(f"Erro ao deletar canal: {e}")
 
 @bot.event
 async def on_thread_create(thread):
