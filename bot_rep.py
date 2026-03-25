@@ -45,6 +45,7 @@ if not TOKEN:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.voice_states = True # <-- ESSA LINHA É OBRIGATÓRIA
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # --- BANCO DE DADOS ---
@@ -845,65 +846,53 @@ class AbrirTicketView(discord.ui.View):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
+    # Log de teste para ver se o bot está ouvindo o evento
+    if after.channel:
+        print(f"DEBUG: {member.name} entrou no canal {after.channel.name} (ID: {after.channel.id})")
+
     # --- 1. DETECÇÃO DE ENTRADA NOS HUBS ---
     if after.channel and after.channel.id in [ID_HUB_DUO, ID_HUB_TRIO]:
+        print(f"🛰️ GATILHO ATIVADO: Criando canal para {member.name}...")
         guild = member.guild
         
-        # Define configurações baseado no canal de entrada
         if after.channel.id == ID_HUB_DUO:
             categoria_alvo = guild.get_channel(ID_CAT_DUO)
-            limite = 2
-            prefixo = "🛰️ DUO"
+            limite, prefixo = 2, "🛰️ DUO"
         else:
             categoria_alvo = guild.get_channel(ID_CAT_TRIO)
-            limite = 3
-            prefixo = "🛸 TRIO"
+            limite, prefixo = 3, "🛸 TRIO"
 
-        # Se a categoria não existir, o bot avisa no console
         if not categoria_alvo:
-            print(f"❌ Erro: Categoria não encontrada para o canal {after.channel.name}")
+            print(f"❌ ERRO: Categoria não encontrada! Verifique o ID.")
             return
 
-        # Permissões: O criador vira o "Dono" da sala
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(connect=True),
-            member: discord.PermissionOverwrite(
-                manage_channels=True,    # Alterar nome/status/limite
-                move_members=True,       # Expulsar intrusos do voice
-                mute_members=True,       # Silenciar membros
-                manage_permissions=True, # Trancar o canal (remover permissão de Connect)
-                priority_speaker=True    # Voz prioritária
-            ),
+            member: discord.PermissionOverwrite(manage_channels=True, move_members=True, manage_permissions=True, connect=True),
             guild.me: discord.PermissionOverwrite(manage_channels=True, connect=True, move_members=True)
         }
 
-        # Cria o canal na categoria correta
-        novo_canal = await guild.create_voice_channel(
-            name=f"{prefixo}: {member.name}",
-            category=categoria_alvo,
-            user_limit=limite,
-            overwrites=overwrites,
-            reason=f"Squad dinâmico criado para {member.name}"
-        )
+        try:
+            novo_canal = await guild.create_voice_channel(
+                name=f"{prefixo}: {member.name}",
+                category=categoria_alvo,
+                user_limit=limite,
+                overwrites=overwrites
+            )
+            print(f"✅ Canal {novo_canal.name} criado com sucesso!")
+            await member.move_to(novo_canal)
+            print(f"➡️ {member.name} movido para o novo canal.")
+        except Exception as e:
+            print(f"❌ ERRO AO CRIAR/MOVER: {e}")
 
-        # Move o jogador para a nova sala
-        await member.move_to(novo_canal)
-
-    # --- 2. SISTEMA DE LIMPEZA (AUTO-DELETE) ---
-    # Verifica se o canal que o membro saiu é um canal dinâmico e se ficou vazio
-    if before.channel:
-        # Verifica se o canal pertence a uma das categorias de Squad
-        if before.channel.category_id in [ID_CAT_DUO, ID_CAT_TRIO]:
-            # Proteção: Não deleta os canais HUB (gatilhos)
-            if before.channel.id not in [ID_HUB_DUO, ID_HUB_TRIO]:
-                # Se não houver mais ninguém, deleta
-                if len(before.channel.members) == 0:
-                    try:
-                        await before.channel.delete(reason="Squad vazio - Limpeza automática.")
-                    except discord.NotFound:
-                        pass # Canal já foi deletado
-                    except Exception as e:
-                        print(f"Erro ao deletar canal: {e}")
+    # --- 2. LIMPEZA ---
+    if before.channel and before.channel.category_id in [ID_CAT_DUO, ID_CAT_TRIO]:
+        if before.channel.id not in [ID_HUB_DUO, ID_HUB_TRIO]:
+            if len(before.channel.members) == 0:
+                try:
+                    await before.channel.delete()
+                    print(f"🧹 Canal {before.channel.name} deletado (vazio).")
+                except: pass
 
 @bot.event
 async def on_thread_create(thread):
