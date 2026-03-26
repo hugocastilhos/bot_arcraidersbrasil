@@ -43,7 +43,6 @@ ID_CAT_DUO = 1486347910885937242   # Categoria para DUOS
 ID_CAT_TRIO = 1486348090741883114  # Categoria para TRIOS
 CANAL_YOUTUBE_URL = "https://www.youtube.com/@ARCRaidersGame/videos"
 CANAL_SHORTS_URL = "https://www.youtube.com/@ARCRaidersGame/shorts"
-ULTIMO_VIDEO_ID = None
 
 if not TOKEN:
     print("❌ ERRO: DISCORD_TOKEN não encontrado!")
@@ -62,6 +61,8 @@ CANAL_MIDIA_ID = 1412423357382529098
 URL_BASE = "https://arcraiders.com"
 URL_NEWS = "https://arcraiders.com/news"
 ULTIMA_NOTICIA_URL = None
+ULTIMO_VIDEO_ID = None
+ULTIMO_SHORTS_ID = None
 
 # --- TRADUTOR DE NOTÍCIAS DO SITE E EXTRATOR DE MÍDIAS OFICIAIS ---
 @tasks.loop(minutes=15)
@@ -175,43 +176,47 @@ async def monitorar_noticias_pro():
 
 @tasks.loop(minutes=15)
 async def monitorar_youtube_arc():
-    global ULTIMO_VIDEO_ID
-    print(f"--- [LOG YT] Verificando novos vídeos e shorts ---")
+    global ULTIMO_VIDEO_ID, ULTIMO_SHORTS_ID
     
-    urls_para_checar = [CANAL_YOUTUBE_URL, CANAL_SHORTS_URL]
+    # Dicionário para gerenciar os dois tipos de busca
+    fontes = {
+        "Vídeo": CANAL_YOUTUBE_URL,
+        "Shorts": CANAL_SHORTS_URL
+    }
     
     async with aiohttp.ClientSession() as session:
-        for url in urls_para_checar:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        
+        for tipo, url in fontes.items():
             try:
-                # User-agent para evitar ser bloqueado como bot básico
-                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
                 async with session.get(url, headers=headers) as resp:
                     if resp.status != 200: continue
                     
                     html = await resp.text()
-                    # Procura por IDs de vídeo no formato "videoId":"ID_DO_VIDEO"
                     video_ids = re.findall(r'"videoId":"([^"]+)"', html)
-                    
                     if not video_ids: continue
                     
                     video_recente = video_ids[0]
+
+                    # Comparação individual por tipo
+                    if tipo == "Vídeo" and video_recente == ULTIMO_VIDEO_ID:
+                        continue
+                    if tipo == "Shorts" and video_recente == ULTIMO_SHORTS_ID:
+                        continue
+
+                    # Atualiza a variável global específica
+                    if tipo == "Vídeo": ULTIMO_VIDEO_ID = video_recente
+                    else: ULTIMO_SHORTS_ID = video_recente
                     
-                    # Se for o mesmo vídeo de antes, pula para a próxima URL
-                    if video_recente == ULTIMO_VIDEO_ID: continue
-                    
-                    ULTIMO_VIDEO_ID = video_recente
                     link_final = f"https://www.youtube.com/watch?v={video_recente}"
-                    
-                    # Canal de Mídia ID: 1412423357382529098
                     canal_midia = bot.get_channel(1412423357382529098)
+                    
                     if canal_midia:
-                        tipo = "Shorts" if "shorts" in url else "Vídeo"
                         await canal_midia.send(f"🎬 **Novo {tipo} detectado no canal oficial!**\n{link_final}")
-                        print(f"✅ Novo {tipo} postado: {video_recente}")
-                        break # Para após postar o mais recente para não floodar
-                        
+                        print(f"✅ [YT] Postagem realizada: {video_recente}")
+
             except Exception as e:
-                print(f"❌ Erro ao monitorar YouTube: {e}")
+                print(f"❌ Erro ao monitorar {tipo}: {e}")
 
 # --- BANCO DE DADOS ---
 def get_db_connection():
@@ -856,13 +861,28 @@ async def on_ready():
     bot.add_view(RegrasView())
     bot.add_view(AbrirTicketView())
     bot.add_view(TicketControlView())
-    monitorar_youtube_arc.start()
     if not monitorar_noticias_pro.is_running():
         monitorar_noticias_pro.start()
     if not manter_banco_vivo.is_running():
         manter_banco_vivo.start()
     print(f"✅ {bot.user.name} Bot Online!")
     await bot.change_presence(activity=discord.Game(name="/ajuda | ARC Raiders Brasil"))
+
+    global ULTIMO_VIDEO_ID, ULTIMO_SHORTS_ID, ULTIMA_NOTICIA_URL
+    
+    # Captura o ID atual silenciosamente para não postar o que já existe ao ligar
+    async with aiohttp.ClientSession() as session:
+        # Exemplo para o YouTube
+        async with session.get(CANAL_YOUTUBE_URL) as r:
+            ids = re.findall(r'"videoId":"([^"]+)"', await r.text())
+            if ids: ULTIMO_VIDEO_ID = ids[0]
+            
+        # Exemplo para Notícias
+        async with session.get(URL_NEWS) as r:
+            soup = BeautifulSoup(await r.text(), 'html.parser')
+            links = [a for a in soup.find_all('a', href=True) if '/news/' in a['href']]
+            if links: ULTIMA_NOTICIA_URL = f"{URL_BASE}{links[0]['href']}"
+
 
 class RegrasView(discord.ui.View):
     def __init__(self):
