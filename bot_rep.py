@@ -448,7 +448,7 @@ async def ajuda(ctx):
         embed.set_thumbnail(url=ctx.guild.icon.url)
     
     embed.set_footer(
-        text=f"Developer: {ctx.author.name} | Sponsor: ! Gio • ARC Raiders Brasil", 
+        text=f"Developer: {ctx.author.name} | Sponsor: !Gio / WARCELUS • ARC Raiders Brasil", 
         icon_url=ctx.author.display_avatar.url
     )
 
@@ -902,7 +902,7 @@ class RegrasView(discord.ui.View):
 
         try:
             await interaction.user.add_roles(cargo)
-            await interaction.response.send_message(f"🚀 Bem-vindo ao fronte, {interaction.user.name}! Você agora é um cidadão de **{nome_cargo}**. Cuidado com os ARC's, outros raiders e boa sorte na extração!", ephemeral=True)
+            await interaction.response.send_message(f"🚀 Bem-vindo ao fronte, {interaction.user.name}! Você agora é um cidadão de **{nome_cargo}**. Cuidado com os ARC's, outros raiders e boa sorte na sua extração!", ephemeral=True)
             # Log opcional
             await enviar_log(interaction, f"✅ **Novo Membro**\n{interaction.user.mention} aceitou as regras.", 0x2ecc71)
         except discord.Forbidden:
@@ -912,7 +912,7 @@ class MotivoFecharTicketModal(discord.ui.Modal, title='Encerrar Atendimento'):
     motivo = discord.ui.TextInput(
         label='Motivo do fechamento',
         style=discord.TextStyle.paragraph,
-        placeholder='Ex: Dúvida tirada / Jogador banido por cheat / Spam...',
+        placeholder='Ex: Dúvida tirada / Jogador banido por cheat / RMT / Spam...',
         required=True,
         min_length=5,
         max_length=300
